@@ -1,0 +1,10 @@
+streamlit
+langchain
+langchain-community
+# langchain-openai
+langchain-google-genai
+feedparser
+chromadb
+beautifulsoup4
+python-dotenv
+tiktoken
