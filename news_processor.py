@@ -1,11 +1,64 @@
+# news_processor.py
+# Process RSS feeds and extract news items.
+
 import feedparser
 from bs4 import BeautifulSoup
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_core.documents import Document
 import re
+from datetime import datetime
+import time
 
-def fetch_news(feed_url):
-    """Fetch and parse news from an RSS feed using dictionary access for maximum robustness."""
+def parse_date(date_str):
+    """Parse various RSS date formats into a standard ISO format (YYYY-MM-DD) and Unix timestamp.
+    Args:
+        date_str (str): The date string to parse.        
+    Returns:
+        tuple: A tuple containing the ISO date string (YYYY-MM-DD) and the Unix timestamp.
+    """
+    if not date_str:
+        return "", 0
+    try:
+        # Let feedparser do the heavy lifting if possible
+        # but we'll try manual parsing for robustness
+        formats = [
+            "%a, %d %b %Y %H:%M:%S %Z",
+            "%a, %d %b %Y %H:%M:%S %z",
+            "%Y-%m-%dT%H:%M:%SZ",
+            "%Y-%m-%d %H:%M:%S"
+        ]
+        
+        for fmt in formats:
+            try:
+                dt = datetime.strptime(date_str, fmt)
+                return dt.strftime("%Y-%m-%d"), int(dt.timestamp())
+            except ValueError:
+                continue
+        
+        return "", 0
+    except Exception:
+        return "", 0
+
+def fetch_news(feed_urls):
+    """Fetch and parse news from multiple RSS feeds using dictionary access for maximum robustness.
+        
+    Returns:
+        list: A list of dictionaries with keys: 
+        title, link, content, published, date_iso, date_timestamp.
+    """
+    all_news_items = []
+    for feed_url in feed_urls:
+        news_items = fetch_feed_news(feed_url)
+        all_news_items.extend(news_items)
+    return all_news_items
+
+def fetch_feed_news(feed_url):
+    """Fetch and parse news from an RSS feed using dictionary access for maximum robustness.
+        
+    Returns:
+        list: A list of dictionaries with keys: 
+        title, link, content, published, date_iso, date_timestamp.
+    """
     feed = feedparser.parse(feed_url)
     news_items = []
     
@@ -31,11 +84,17 @@ def fetch_news(feed_url):
             else:
                 clean_text = "No content available."
             
+            # Parse publication date
+            raw_date = entry.get('published', '')
+            iso_date, timestamp = parse_date(raw_date)
+            
             news_items.append({
                 'title': title,
                 'link': link,
                 'content': clean_text,
-                'published': entry.get('published', '')
+                'published': raw_date,
+                'date_iso': iso_date,
+                'date_timestamp': timestamp
             })
         except Exception:
             continue # Skip problematic entries rather than crashing the whole fetch
@@ -43,7 +102,14 @@ def fetch_news(feed_url):
     return news_items
 
 def process_news_to_documents(news_items):
-    """Convert news items into LangChain Document objects and split into chunks with strict filtering."""
+    """Convert news items into LangChain Document objects and split into chunks with strict filtering.
+    
+    Args:
+        news_items (list): A list of dictionaries, each containing news item data.
+        
+    Returns:
+        list: A list of Document objects, each split into chunks with metadata.
+    """
     documents = []
     for item in news_items:
         # Final safety check on content
@@ -55,7 +121,9 @@ def process_news_to_documents(news_items):
         metadata = {
             'title': item['title'],
             'link': item['link'],
-            'published': item['published']
+            'published': item['published'],
+            'date_iso': item.get('date_iso', ''),
+            'date_timestamp': item.get('date_timestamp', 0)
         }
         documents.append(Document(page_content=text, metadata=metadata))
         
